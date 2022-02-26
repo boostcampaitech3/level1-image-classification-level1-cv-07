@@ -1,0 +1,11 @@
+001737_male_Asian_18
+006477_female_Asian_18
+003227_female_Asian_19
+006094_male_Asian_19
+003123_female_Asian_19
+006023_male_Asian_18
+006351_female_Asian_18
+003176_female_Asian_19
+004352_male_Asian_18
+006347_female_Asian_18
+003164_female_Asian_19

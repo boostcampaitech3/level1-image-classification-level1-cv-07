@@ -6,14 +6,12 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
-from dataset import TestDataset, MaskBaseDataset
+from dataset import TestDataset, MaskBaseDataset, CustomDatasetSplitByProfile
 
 
-def load_model(saved_model, num_classes, device):
-    model_cls = getattr(import_module("model"), args.model)
-    model = model_cls(
-        num_classes=num_classes
-    )
+def load_model(saved_model, device):
+    model_cls = getattr(import_module("model"), args['model'])
+    model = model_cls(**args['model_args'])
 
     # tarpath = os.path.join(saved_model, 'best.tar.gz')
     # tar = tarfile.open(tarpath, 'r:gz')
@@ -32,8 +30,8 @@ def inference(data_dir, model_dir, output_dir, args):
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
 
-    num_classes = MaskBaseDataset.num_classes  # 18
-    model = load_model(model_dir, num_classes, device).to(device)
+    # num_classes = MaskBaseDataset.num_classes  # 18
+    model = load_model(model_dir, device).to(device)
     model.eval()
 
     img_root = os.path.join(data_dir, 'images')
@@ -41,10 +39,18 @@ def inference(data_dir, model_dir, output_dir, args):
     info = pd.read_csv(info_path)
 
     img_paths = [os.path.join(img_root, img_id) for img_id in info.ImageID]
-    dataset = TestDataset(img_paths, args.resize)
+
+    transform_module = getattr(import_module("dataset"), args['augmentation'])
+    aug_args = args['augmentation_args']
+    if aug_args.get('mean', None) is None:
+        aug_args['mean'] = args['dataset_args']['mean']
+        aug_args['std'] = args['dataset_args']['std']
+    val_transform = transform_module(is_train=False, **aug_args)
+
+    dataset = TestDataset(img_paths, val_transform, use_PIL=args['dataset_args']['use_PIL'])
     loader = torch.utils.data.DataLoader(
         dataset,
-        batch_size=args.batch_size,
+        batch_size=args['valid_batch_size'],
         num_workers=8,
         shuffle=False,
         pin_memory=use_cuda,
@@ -56,8 +62,15 @@ def inference(data_dir, model_dir, output_dir, args):
     with torch.no_grad():
         for idx, images in enumerate(loader):
             images = images.to(device)
-            pred = model(images)
-            pred = pred.argmax(dim=-1)
+            outs = model(images)
+
+            if args['dataset_args']['output'] == 'all':
+                pred = CustomDatasetSplitByProfile.encode_multi_class(outs)
+            elif args['dataset_args']['output'] == 'gender':
+                pred = (outs >= .5).squeeze().int()
+            else:
+                pred = torch.argmax(outs, dim=-1)
+
             preds.extend(pred.cpu().numpy())
 
     info['ans'] = preds
@@ -66,24 +79,29 @@ def inference(data_dir, model_dir, output_dir, args):
 
 
 if __name__ == '__main__':
+    import yaml
+
     parser = argparse.ArgumentParser()
+    #
+    # # Data and model checkpoints directories
+    # parser.add_argument('--batch_size', type=int, default=1000, help='input batch size for validing (default: 1000)')
+    # parser.add_argument('--resize', type=tuple, default=(96, 128), help='resize size for image when you trained (default: (96, 128))')
+    # parser.add_argument('--model', type=str, default='BaseModel', help='model type (default: BaseModel)')
+    #
+    # # Container environment
+    # parser.add_argument('--data_dir', type=str, default=os.environ.get('SM_CHANNEL_EVAL', '/opt/ml/input/data/eval'))
+    # parser.add_argument('--model_dir', type=str, default=os.environ.get('SM_CHANNEL_MODEL', './model'))
+    # parser.add_argument('--output_dir', type=str, default=os.environ.get('SM_OUTPUT_DATA_DIR', './output'))
+    #
+    parser.add_argument('--model_dir', type=str)
+    model_dir = parser.parse_args().model_dir
 
-    # Data and model checkpoints directories
-    parser.add_argument('--batch_size', type=int, default=1000, help='input batch size for validing (default: 1000)')
-    parser.add_argument('--resize', type=tuple, default=(96, 128), help='resize size for image when you trained (default: (96, 128))')
-    parser.add_argument('--model', type=str, default='BaseModel', help='model type (default: BaseModel)')
+    with open(os.path.join(model_dir, 'config.yaml'), 'r') as f:
+        args = yaml.load(f, Loader=yaml.FullLoader)
 
-    # Container environment
-    parser.add_argument('--data_dir', type=str, default=os.environ.get('SM_CHANNEL_EVAL', '/opt/ml/input/data/eval'))
-    parser.add_argument('--model_dir', type=str, default=os.environ.get('SM_CHANNEL_MODEL', './model'))
-    parser.add_argument('--output_dir', type=str, default=os.environ.get('SM_OUTPUT_DATA_DIR', './output'))
+    data_dir = args['infer_data_dir']
+    output_dir = model_dir
 
-    args = parser.parse_args()
-
-    data_dir = args.data_dir
-    model_dir = args.model_dir
-    output_dir = args.output_dir
-
-    os.makedirs(output_dir, exist_ok=True)
+    # os.makedirs(output_dir, exist_ok=True)
 
     inference(data_dir, model_dir, output_dir, args)

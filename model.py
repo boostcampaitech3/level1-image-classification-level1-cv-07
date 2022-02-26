@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+import torchvision
 
 class BaseModel(nn.Module):
     def __init__(self, num_classes):
@@ -50,4 +50,28 @@ class MyModel(nn.Module):
         1. 위에서 정의한 모델 아키텍쳐를 forward propagation 을 진행해주세요
         2. 결과로 나온 output 을 return 해주세요
         """
+        return x
+
+
+class EffNetB0(nn.Module):
+    def __init__(self, num_classes, dropout_p, use_sigmoid=False):
+        super().__init__()
+        self.use_sigmoid = use_sigmoid
+
+        self.effnet = torchvision.models.efficientnet_b0(pretrained=True)
+        in_feats = self.effnet.classifier[1].in_features
+        del self.effnet.classifier[1]
+
+        self.classifier = nn.Sequential(
+            nn.Linear(in_feats, 512, bias=True),
+            nn.Dropout(p=dropout_p),
+            nn.ReLU(),
+            nn.Linear(512, num_classes, bias=True),
+        )
+
+    def forward(self, x):
+        x = self.effnet(x)
+        x = self.classifier(x)
+        if self.use_sigmoid:
+            x = F.sigmoid(x)
         return x

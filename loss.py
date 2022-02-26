@@ -1,3 +1,4 @@
+import colors
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -46,6 +47,7 @@ class F1Loss(nn.Module):
         super().__init__()
         self.classes = classes
         self.epsilon = epsilon
+
     def forward(self, y_pred, y_true):
         assert y_pred.ndim == 2
         assert y_true.ndim == 1
@@ -65,11 +67,38 @@ class F1Loss(nn.Module):
         return 1 - f1.mean()
 
 
+class CustomLoss(nn.Module):
+    def __init__(self, test=None):
+        super().__init__()
+        self.focal_loss = FocalLoss()
+        if test is not None:
+            print(colors.red(test))
+
+    def forward(self, y_pred, y_true):
+        # y_pred(n, 8), y_true(n, 3)
+        p_mask, p_gender, p_age = torch.split(y_pred, [3, 2, 3], dim=-1)
+        t_mask = y_true[:, 0].long()
+        t_gender = y_true[:, 1].long()
+        t_age = y_true[:, 2].long()
+
+        # TODO: 가중치 주기
+        # loss = F.cross_entropy(p_mask, t_mask) \
+        #     + F.cross_entropy(p_gender, t_gender) \
+        #     + F.cross_entropy(p_age, t_age)
+
+        loss = self.focal_loss(p_mask, t_mask) \
+            + self.focal_loss(p_gender, t_gender) \
+            + self.focal_loss(p_age, t_age)
+        return loss
+
+
 _criterion_entrypoints = {
     'cross_entropy': nn.CrossEntropyLoss,
     'focal': FocalLoss,
     'label_smoothing': LabelSmoothingLoss,
-    'f1': F1Loss
+    'f1': F1Loss,
+    'BCELoss': nn.BCELoss,
+    'custom': CustomLoss,
 }
 
 

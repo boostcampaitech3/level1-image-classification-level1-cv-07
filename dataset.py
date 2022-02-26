@@ -2,10 +2,14 @@ import os
 import random
 from collections import defaultdict
 from enum import Enum
-from typing import Tuple, List
+from typing import Tuple, List, Sequence, Optional, Union
 
+import cv2
 import numpy as np
 import torch
+import colors
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
 from PIL import Image
 from torch.utils.data import Dataset, Subset, random_split
 from torchvision import transforms
@@ -132,7 +136,7 @@ class MaskBaseDataset(Dataset):
 
         self.transform = None
         self.setup()
-        self.calc_statistics()
+        # self.calc_statistics()
 
     def setup(self):
         profiles = os.listdir(self.data_dir)
@@ -295,16 +299,17 @@ class MaskSplitByProfileDataset(MaskBaseDataset):
 
 
 class TestDataset(Dataset):
-    def __init__(self, img_paths, resize, mean=(0.548, 0.504, 0.479), std=(0.237, 0.247, 0.246)):
+    def __init__(self, img_paths, transform, use_PIL):
         self.img_paths = img_paths
-        self.transform = transforms.Compose([
-            Resize(resize, Image.BILINEAR),
-            ToTensor(),
-            Normalize(mean=mean, std=std),
-        ])
+        self.transform = transform
+        self.use_PIL = use_PIL
 
     def __getitem__(self, index):
-        image = Image.open(self.img_paths[index])
+        img_path = self.img_paths[index]
+        if self.use_PIL:
+            image = Image.open(img_path)
+        else:
+            image = cv2.cvtColor(cv2.imread(img_path), cv2.COLOR_BGR2RGB)
 
         if self.transform:
             image = self.transform(image)
@@ -312,3 +317,223 @@ class TestDataset(Dataset):
 
     def __len__(self):
         return len(self.img_paths)
+
+
+# TODO: train / valid dataset
+# 0. 이미지 단위 대신 인물 단위로 데이터셋 분할
+#   이미지 단위로 분할: gender, age 추론에 대해서는 validation 데이터셋이 오염된 것으로 취급할 수 있다고 생
+# 1. 출력 선택
+#   class 0~17 / [mask: 0~2, gender: 0~1, age: 0~2] / 개별 속성 (mask: 0~2 | gender: 0~1 | age: 0~2)
+# 2. 입력 선택
+#   인물별 디렉토리 경로 모음 / csv / ...
+
+
+class CustomDatasetSplitByProfile(MaskBaseDataset):
+    """마스크 데이터셋
+
+    주어진 텍스트 파일에서 프로필을 읽어 데이터셋 구성.
+    output 파라미터를 통해 데이터셋 라벨 출력 설정.
+    데이터 로드시에 이미지의 RGB mean, std를 계산하여 출력. 복사하여 재사용 추천.
+
+    Args:
+        data_dir:
+            profile 디렉토리를 포함하는 디렉토리 경로
+        profiles_file:
+            각 줄에 profile(ex - 006477_female_Asian_18)을 포함하는 텍스트파일 경로
+        output:
+            데이터셋 출력
+                * class: 0~17
+                * mask | gender | age: 각 속성의 label
+                * all: (mask, gender, age)
+        mean:
+            이미지 RGB mean / None인 경우 계산
+        std:
+            이미지 RGB std / None인 경우 계산
+        use_PIL:
+            이미지를 PIL로 읽음. False인 경우 opencv로 읽음.
+        pass_calc_statistics:
+            True인 경우 이미지 RGB mean, std 계산을 pass / validation 셋에서 생략하기 위함.
+    """
+    def __init__(self,
+                 data_dir: str,
+                 profiles_file: str,
+                 output: str = 'all',
+                 mean: Optional[Sequence] = None,
+                 std: Optional[Sequence] = None,
+                 pass_calc_statistics: bool = False,
+                 use_PIL: bool = True,
+                 ):
+        if output not in ('all', 'mask', 'gender', 'age', 'class'):
+            raise ValueError(f'정의되지 않은 output: {output} / (all|mask|gender|age|class)')
+        self.output = output
+        self.profiles_file = profiles_file
+        self.aug_by_torchvision = use_PIL
+        super().__init__(data_dir, mean, std, None)
+
+        if not pass_calc_statistics:
+            self.calc_statistics()
+
+    def calc_statistics(self):
+        super().calc_statistics()
+        print(colors.red('mean:'), tuple(self.mean))
+        print(colors.red('std:'), tuple(self.std))
+
+    def read_image(self, index):
+        if self.aug_by_torchvision:
+            return super().read_image(index)
+        else:
+            image_path = self.image_paths[index]
+            return cv2.cvtColor(cv2.imread(image_path), cv2.COLOR_BGR2RGB)
+
+    def setup(self):
+        self.image_paths = []
+        self. mask_labels = []
+        self.gender_labels = []
+        self.age_labels = []
+
+        with open(self.profiles_file, 'r') as f:  # 텍스트 파일 로드
+            profiles = [line.strip('\n') for line in f.readlines()]
+
+        for profile in profiles:
+            _, gender, _, age = profile.split('_')
+            gender_label = GenderLabels.from_str(gender)
+            age_label = AgeLabels.from_number(age)
+
+            img_dir = os.path.join(self.data_dir, profile)
+            for img_name in os.listdir(img_dir):
+                stem, ext = os.path.splitext(img_name)
+                if stem not in self._file_names:  # 정의된 파일명 외에는 제거
+                    continue
+
+                image_path = os.path.join(self.data_dir, profile, img_name)
+                mask_label = self._file_names[stem]
+
+                self.image_paths.append(image_path)
+                self.mask_labels.append(mask_label)
+                self.gender_labels.append(gender_label)
+                self.age_labels.append(age_label)
+
+    def __getitem__(self, index):
+        assert self.transform is not None, ".set_tranform 메소드를 이용하여 transform 을 주입해주세요"
+
+        image = self.read_image(index)
+        mask_label = self.get_mask_label(index)
+        gender_label = self.get_gender_label(index)
+        age_label = self.get_age_label(index)
+
+        if self.output == 'class':
+            label = self.encode_multi_class((mask_label, gender_label, age_label))
+        elif self.output == 'all':
+            label = torch.tensor([mask_label, gender_label, age_label])
+        elif self.output == 'mask':
+            label = mask_label
+        elif self.output == 'gender':
+            label = gender_label
+        else:
+            label = age_label
+
+        image_transform = self.transform(image)
+        return image_transform, label
+
+    @staticmethod
+    def encode_multi_class(decoded: Union[torch.Tensor, Sequence[int]]) -> torch.Tensor:
+        with torch.no_grad():
+            if not isinstance(decoded, torch.Tensor):
+                decoded = torch.tensor(decoded)
+
+            if decoded.shape[-1] == 3:  # label
+                mask_label, gender_label, age_label = map(torch.squeeze, torch.split(decoded, [1, 1, 1], -1))
+            elif decoded.shape[-1] == 8:  # prediction
+                mask_pred, gender_pred, age_pred = torch.split(decoded, [3, 2, 3], -1)
+                mask_label = mask_pred.argmax(-1).squeeze()
+                gender_label = gender_pred.argmax(-1).squeeze()
+                age_label = age_pred.argmax(-1).squeeze()
+            else:
+                raise ValueError(f'정의되지 않은 입력 차원: {decoded.shape[1]} / (3|8)')
+
+        return mask_label * 6 + gender_label * 3 + age_label
+
+
+class ATransform:
+    """albumentation 이용시에 상속하여 transform 정의"""
+    def __call__(self, x):
+        return self.transform(image=x)['image']
+
+
+class Aug0(ATransform):
+    """albumentation 예시"""
+    def __init__(self, resize, mean, std, is_train=True):
+        if is_train:
+            self.transform = A.Compose([
+                A.Resize(*resize),
+                A.HorizontalFlip(p=.5),
+                A.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.1, rotate_limit=15, p=0.75),
+                A.RGBShift(r_shift_limit=15, g_shift_limit=15, b_shift_limit=15, p=0.75),
+                A.RandomBrightnessContrast(p=0.75),
+                A.Normalize(mean=mean, std=std),
+                ToTensorV2(),
+            ])
+        else:
+            self.transform = A.Compose([
+                A.Resize(*resize),
+                A.Normalize(mean=mean, std=std),
+                ToTensorV2(),
+            ])
+
+
+if __name__ == '__main__':
+    import numpy as np
+
+    DATA_DIR, PROFILES_FILE = '/opt/ml/input/data/train/images', 'profile_test.txt'
+
+    dataset_output_all = CustomDatasetSplitByProfile(
+        data_dir=DATA_DIR,
+        profiles_file=PROFILES_FILE,
+        output='all',
+    )
+    dataset_output_all.set_transform(lambda x: np.array(x).shape)
+    print('output all:', next(iter(dataset_output_all)), '\n')
+
+    dataset_output_mask = CustomDatasetSplitByProfile(
+        data_dir=DATA_DIR,
+        profiles_file=PROFILES_FILE,
+        output='mask',
+    )
+    dataset_output_mask.set_transform(lambda x: np.array(x).shape)
+    print('output mask:', next(iter(dataset_output_mask)), '\n')
+
+    dataset_output_class = CustomDatasetSplitByProfile(
+        data_dir=DATA_DIR,
+        profiles_file=PROFILES_FILE,
+        output='class',
+    )
+    dataset_output_class.set_transform(lambda x: np.array(x).shape)
+    print('output class:', dataset_output_class[0], '\n')
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

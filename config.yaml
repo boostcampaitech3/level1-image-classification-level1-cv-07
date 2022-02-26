@@ -1,0 +1,63 @@
+# -- general
+seed: 815
+data_dir: /opt/ml/input/data/train/images
+train_profile: /opt/ml/input/data/train/train_profile.txt
+valid_profile: /opt/ml/input/data/train/valid_profile.txt
+
+num_classes: 2
+train_batch_size: 64
+valid_batch_size: 128
+
+# -- train
+epochs: 25
+log_interval: 20
+
+# -- model save
+model_dir: ./runs
+name: test_gender
+best_criterion: f1  # f1 | acc | loss
+
+# -- dataset
+dataset: CustomDatasetSplitByProfile
+dataset_args: {
+  output: gender,  # all | class | mask | gender | age
+  mean: [0.5426200248568659, 0.5350883917648542, 0.5203585094443599],
+  std: [0.5956151184893946, 0.5913073501353256, 0.582017057581248],
+  use_PIL: False,
+}
+augmentation: Aug0
+augmentation_args: {
+  resize: [256, 192]
+}
+
+# -- model
+model: EffNetB0
+model_args: {
+  num_classes: 1,
+  dropout_p: .4,
+  use_sigmoid: True,
+}
+
+# -- loss
+criterion: BCELoss
+criterion_args: {
+}
+
+# -- optimizer
+optimizer: Adam_GC
+lr: 1.e-3
+weight_decay: 5.e-4
+scheduler: warmup_cosine
+scheduler_args: {
+  warmup_ratio: .1,
+  total_epochs: 25,
+  min_ratio: .05,
+}
+
+# --inference
+infer_data_dir: /opt/ml/input/data/eval
+
+
+
+
+
