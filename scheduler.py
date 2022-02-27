@@ -4,8 +4,8 @@ from importlib import import_module
 
 
 # -- cos + warmup
-def cos_func(warmup_epochs, total_epochs, min_ratio):
-    def inner_func(x):
+def cos_func(warmup_epochs: int, total_epochs: int, min_ratio: float):
+    def inner_func(x: int):
         if x <= warmup_epochs:
             return min_ratio + (1 - min_ratio) * (x / warmup_epochs)
         else:
@@ -43,7 +43,8 @@ schedulers = {
 }
 
 
-def get_scheduler_module(scheduler_name):
+def get_scheduler_module(scheduler_name: str):
+    """스케쥴러 이름을 통해 스케쥴러 반환"""
     if scheduler_name in schedulers:
         return schedulers[scheduler_name]
     else:

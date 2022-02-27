@@ -343,7 +343,7 @@ class CustomDatasetSplitByProfile(MaskBaseDataset):
         output:
             데이터셋 출력
                 * class: 0~17
-                * mask | gender | age: 각 속성의 label
+                * mask | gender | age: 각 속성의 label, 0~2 or 0~1
                 * all: (mask, gender, age)
         mean:
             이미지 RGB mean / None인 경우 계산
@@ -386,6 +386,7 @@ class CustomDatasetSplitByProfile(MaskBaseDataset):
             return cv2.cvtColor(cv2.imread(image_path), cv2.COLOR_BGR2RGB)
 
     def setup(self):
+        """profile 파일로부터 이미지 경로, 마스크, 성별, 연령대 라벨 획득"""
         self.image_paths = []
         self. mask_labels = []
         self.gender_labels = []
