@@ -45,7 +45,7 @@ criterion_args: {
 # cross_entropy: multi class - class | mask | age
 # focal: multi class - class | mask | age
 # label_smoothing: multi class - class | mask | age
-# f1: multi class - all | class | mask | age |
+# f1: multi class - all | class | mask | age
 # BCELoss: binary class - gender
 # custom: multi label - all
 
