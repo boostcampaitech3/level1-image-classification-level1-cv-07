@@ -4,7 +4,7 @@ data_dir: /opt/ml/input/data/train/images
 train_profile: /opt/ml/input/data/train/train_profile.txt
 valid_profile: /opt/ml/input/data/train/valid_profile.txt
 
-num_classes: 2
+num_classes: 3  # all: 18 | class: 18 | mask: 3 | gender: 2 | age: 3
 train_batch_size: 64
 valid_batch_size: 128
 
@@ -14,13 +14,13 @@ log_interval: 20
 
 # -- model save
 model_dir: ./runs
-name: test_gender
+name: test_age
 best_criterion: f1  # f1 | acc | loss
 
 # -- dataset
 dataset: CustomDatasetSplitByProfile
 dataset_args: {
-  output: gender,  # all | class | mask | gender | age
+  output: age,  # all | class | mask | gender | age
   mean: [0.5426200248568659, 0.5350883917648542, 0.5203585094443599],
   std: [0.5956151184893946, 0.5913073501353256, 0.582017057581248],
   use_PIL: False,
@@ -33,15 +33,21 @@ augmentation_args: {
 # -- model
 model: EffNetB0
 model_args: {
-  num_classes: 1,
-  dropout_p: .4,
-  use_sigmoid: True,
+  num_classes: 3,  # all: 8 | class: 18 | mask: 3 | gender: 1 | age: 3
+  dropout_p: .5,
+  use_sigmoid: False,  # gender: True
 }
 
 # -- loss
-criterion: BCELoss
+criterion: cross_entropy
 criterion_args: {
 }
+# cross_entropy: multi class - class | mask | age
+# focal: multi class - class | mask | age
+# label_smoothing: multi class - class | mask | age
+# f1: multi class - all | class | mask | age |
+# BCELoss: binary class - gender
+# custom: multi label - all
 
 # -- optimizer
 optimizer: Adam_GC
@@ -56,8 +62,3 @@ scheduler_args: {
 
 # --inference
 infer_data_dir: /opt/ml/input/data/eval
-
-
-
-
-
