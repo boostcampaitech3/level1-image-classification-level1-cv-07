@@ -1,7 +1,7 @@
 # -- general
 seed: 815
 data_dir: /opt/ml/input/data/train/images
-train_profile: /opt/ml/input/data/train/train_profile.txt
+train_profile: /opt/ml/input/data/train/train_profile_delete.txt
 valid_profile: /opt/ml/input/data/train/valid_profile.txt
 
 num_classes: 3  # all: 18 | class: 18 | mask: 3 | gender: 2 | age: 3
